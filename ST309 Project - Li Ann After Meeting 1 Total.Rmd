@@ -1,0 +1,210 @@
+---
+title: "Crime Rates in London - Total Crime Rate Regression"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Data Cleaning
+```{r}
+dat <- read.csv("Cleaned_Data_v7.csv", header=T)
+names(dat) #12 variables
+#predictor variables: popn_density, gcse, migrant_popn, house_prices, rough_sleepers, median_income, cluster_none
+#continuous variables: popn_density, gcse, migrant_popn, house_prices, rough_sleepers, median_income
+#categorical variables: cluster_none
+#response variables: crime_rate_per_total
+nrow(dat) #1536 data points
+```
+
+```{r}
+#check data type
+class(dat$Borough) #factor
+class(dat$crime_rate_per_total) #numeric
+class(dat$crime_rate_per_high) #numeric
+class(dat$crime_rate_per_medium) #numeric
+class(dat$crime_rate_per_low) #numeric
+class(dat$popn_density) #numeric
+class(dat$gcse) #numeric
+class(dat$migrant_popn) #integer
+class(dat$house_prices) #numeric
+class(dat$rough_sleepers) #factor
+class(dat$median_income) #numeric
+class(dat$cluster_none) #integer
+```
+
+```{r}
+#change variable class
+dat$migrant_popn <- as.numeric(dat$migrant_popn)
+dat$rough_sleepers <- as.numeric(dat$rough_sleepers)
+dat$cluster_none <- as.factor(dat$cluster_none)
+#check class has changed
+class(dat$migrant_popn) #numeric
+class(dat$rough_sleepers) #numeric
+class(dat$cluster_none) #factor
+```
+
+```{r}
+#missing values
+summary(dat) #no missing values
+```
+
+#Initial Regression (without logged variables)
+```{r}
+regtot1 <- lm(crime_rate_per_total~popn_density+gcse+migrant_popn+house_prices+rough_sleepers+median_income+cluster_none, data=dat)
+summary(regtot1) #significant variables: popn_density, gcse, hosue_prices, cluster_none2, cluster_none5, adjusted R squared: 0.8509
+```
+
+
+#Regression logging all variables
+```{r}
+#log all variables
+regtot1 <- lm(log(crime_rate_per_total)~log(popn_density)+log(gcse)+log(migrant_popn)+log(house_prices)+log(rough_sleepers)+log(median_income)+cluster_none, data=dat)
+summary(regtot1) #significant variables: popn density, gcse, house prices, median income, cluster_none; adjusted r squared is 0.7946
+```
+
+Variable Selection
+```{r}
+#Check Multicollinearity
+attach(dat)
+library(corrplot)
+
+dat2_tot <- data.frame(cbind(crime_rate_per_total, popn_density,gcse,migrant_popn,house_prices,rough_sleepers, median_income, cluster_none))
+dat2cor_tot <- cor(dat2_tot)
+corrplot(dat2cor_tot, type="upper", order="hclust")
+
+library(car)
+#TRY VIF
+vif_tot <- lm(log(crime_rate_per_total)~log(popn_density)+log(gcse)+log(migrant_popn)+log(house_prices)+log(rough_sleepers)+log(median_income)+cluster_none)
+vif(vif_tot)
+```
+
+```{r}
+#Best Subset Selection based on BIC
+model_bs_tot <- leaps::regsubsets(log(crime_rate_per_total)~log(popn_density)+log(gcse)+log(migrant_popn)+log(house_prices)+log(rough_sleepers)+log(median_income)+cluster_none,nvmax=11,data=dat)
+plot(model_bs_tot, scale="Cp") #log(popn density), log(gcse), log(house prices), log(median_income), cluster2, cluster3, cluster4, cluster5
+
+#model after carrying out best subset selection
+summary(lm(log(crime_rate_per_total)~log(popn_density)+log(gcse)+log(house_prices)+log(median_income)+cluster_none,nvmax=11,data=dat))
+```
+t-test
+Take out log(median_income)
+
+Partial F test: treat the factor, cluster_none as one variable rather than viewing it as individual levels, so to see whether the fadctor is significant, we use the partial F test rather than the test for whether or not the individual levels are significant.
+```{r}
+library(ggplot2)
+levels(dat$cluster_none)
+
+#test whether the factor is significant
+#unrestricted model
+uPr_tot <- lm(log(crime_rate_per_total)~log(popn_density)+log(gcse)+log(house_prices)+cluster_none,data=dat)
+#restricted model
+rPr_tot <- lm(log(crime_rate_per_total)~log(popn_density)+log(gcse)+log(house_prices),data=dat)
+anova(rPr_tot,uPr_tot)
+```
+There is very strong evidence to reject the null that the factor cluster_total is not significant.
+
+
+#Regression after Variable Selection
+```{r}
+regtot2 <- lm(log(crime_rate_per_total)~log(popn_density)+log(gcse)+log(house_prices)+cluster_none,nvmax=11,data=dat)
+summary(regtot2) #adjusted r squared is 0.794
+```
+The adjusted R squared is around the same after carrying out Variable Selection for Total Crime Rate.
+
+
+Regression diagnostic
+```{r}
+#Partial residual plot
+# car::crPlots(regtot1, line=F, smooth=T) #detect var and covar problem using partial residual plot
+# car::crPlots(regtot2, line=F, smooth=T) #handle by transformation on y
+
+
+#Influential points
+#Cook's D
+plot(regtot2, which=4)
+abline(h=4/1536,col="blue")
+legend(0, 1, legend=c("4/32"),
+       col=c("blue"), lty=1, cex=0.8)
+cd=cooks.distance(regtot2)
+cd[cd>4/1536]
+
+
+#remove outliers
+regtot2
+summary(regtot2) #adjusted r squared: 0.794
+regtot3 <- lm(log(crime_rate_per_total)~log(popn_density)+log(gcse)+log(house_prices)+cluster_none, data=dat[-c(884,1535,1536),])
+regtot3
+summary(regtot3) #adjusted r squared: 0.7951
+plot(regtot3,which=4)
+
+#Normal QQ plot
+library(ggplot2)
+ggplot(regtot3) +
+  stat_qq(aes(sample = .stdresid)) +
+  geom_abline()
+#follows Normality Assumption
+```
+
+
+
+
+```{r}
+#Visual scatterplots of our predictors against the number of total crime per 1000 population
+attach(dat)
+par(mfrow=c(3,2))
+
+plot(popn_density, crime_rate_per_total, xlab="Population density", ylab="Crime Rate (Total Severity)", main="Population density scatterplot")
+abline(lm(crime_rate_per_total~popn_density),col="red")
+
+plot(gcse, crime_rate_per_total, xlab="GCSE Results", ylab="Crime Rate (Total Severity)", main="GCSE Results scatterplot")
+abline(lm(crime_rate_per_total~gcse),col="red")
+
+plot(migrant_popn, crime_rate_per_total, xlab="Migrant Population", ylab="Crime Rate (Total Severity)", main="Migrant Population scatterplot")
+abline(lm(crime_rate_per_total~migrant_popn),col="red")
+
+plot(house_prices, crime_rate_per_total, xlab="House Prices", ylab="Crime Rate (Total Severity)", main="House prices scatterplot")
+abline(lm(crime_rate_per_total~house_prices),col="red")
+
+plot(rough_sleepers, crime_rate_per_total, xlab="Number of rough sleepers", ylab="Crime Rate (Total Severity)", main="Number of rough sleepers scatterplot")
+abline(lm(crime_rate_per_total~rough_sleepers),col="red")
+
+plot(median_income, crime_rate_per_total, xlab="Median Income", ylab="Crime Rate (Total)", main="Number of rough sleepers scatterplot")
+abline(lm(crime_rate_per_total~median_income),col="red")
+
+
+#Visual scatterplots of our predictors against the number of total crime per 1000 population, which shows a more spread out graph
+par(mfrow=c(3,2))
+plot(log(popn_density), log(crime_rate_per_total), xlab="Population density", ylab="Crime Rate (Total Severity)", main="Population density scatterplot")
+abline(lm(log(crime_rate_per_total)~log(popn_density)),col="red")
+
+plot(log(gcse), log(crime_rate_per_total), xlab="GCSE Results", ylab="Crime Rate (Total Severity)", main="GCSE Results scatterplot")
+abline(lm(log(crime_rate_per_total)~log(gcse)),col="red")
+
+plot(log(migrant_popn), log(crime_rate_per_total), xlab="Migrant Population", ylab="Crime Rate (Total Severity)", main="Migrant Population scatterplot")
+abline(lm(log(crime_rate_per_total)~log(migrant_popn)),col="red")
+
+plot(log(house_prices), log(crime_rate_per_total), xlab="House Prices", ylab="Crime Rate (Total Severity)", main="House prices scatterplot")
+abline(lm(log(crime_rate_per_total)~log(house_prices)),col="red")
+
+plot(log(rough_sleepers), log(crime_rate_per_total), xlab="Number of rough sleepers", ylab="Crime Rate (Total Severity)", main="Number of rough sleepers scatterplot")
+abline(lm(log(crime_rate_per_total)~log(rough_sleepers)),col="red")
+
+plot(log(median_income), log(crime_rate_per_total), xlab="Median Income", ylab="Crime Rate (Total Severity)", main="Number of rough sleepers scatterplot")
+abline(lm(log(crime_rate_per_total)~log(rough_sleepers)),col="red")
+
+detach(dat)
+```
+
+
+
+
+
+
+
+
+
