@@ -1,0 +1,463 @@
+---
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+```
+
+### 1. Introduction and Summary
+#### 1.1 Objectives
+The Market_data2019.csv dataset comprises of information on the Price-to-earnings ratio and related variables of 282 industries. The aim of this report is to obtain a multiple linear regression model of the Price-to-earnings ratio in terms of the other variables. The proposed model should possess a high explanatory power, easily interpretable, and a low penalised likelihood criteria value.
+
+
+The characteristics for the regression model are:
+Response variable: PE  
+Continuous variable	: ROE, EPS_Growth, PBV, PS, Beta, Cost_of_Equity, CEO_holding, Institutional_holding  
+Discrete variable		: Number_of_firms  
+Categorical variable	: Region, Industry  
+
+
+$$
+PE=\hat{\beta_0}+\hat{\beta_1}log(\text{Number of firms})+ \hat{\beta_2}log(EPS Growth) +\hat{\beta_3}log(PBV) +\hat{\beta_4}PS\\
+\hat{\beta_0}= 2.30594821\quad
+\hat{\beta_1}= 0.25279965\quad
+\hat{\beta_2}= -0.09316307\quad
+\hat{\beta_3}= 0.33839246\quad
+\hat{\beta_4}= 0.08629302\quad
+$$
+
+### 2. Data Analysis
+
+#### 2.1 Data Cleaning
+R has wrongly viewed ROE, EPS_Growth, Cost_of_Equity, CEO_holding, Institutional_holding as factors. Therefore, they are changed to a numeric class. Furthermore, there is a missing value in the PBV column in the Restaurant/Dining Industry in the US Region. This row was subsequently omitted by assuming this missing value has occurred randomly.
+
+```{r}
+#change variable class
+dat <- read.csv("Market_data2019.csv", header=T)
+dat$ROE <-  as.numeric(gsub("[\\%,]", "", dat$ROE))
+dat$EPS_Growth <-  as.numeric(gsub("[\\%,]", "", dat$EPS_Growth))
+dat$Cost_of_Equity <-  as.numeric(gsub("[\\%,]", "", dat$Cost_of_Equity))
+dat$CEO_holding <-  as.numeric(gsub("[\\%,]", "", dat$CEO_holding))
+dat$Institutional_holding <-  as.numeric(gsub("[\\%,]", "", dat$Institutional_holding))
+write.csv(dat,'Market_data_clean.csv')
+```
+```{r}
+dat <- na.omit(dat) #omit NA values
+```
+
+```{r}
+#Initial Regression of all variables
+reg1 <- lm(PE~.-PE, data=dat)
+#summary(reg1)$adj.r.squared #adjusted r squared is 0.1726408
+```
+
+#### 2.2 Transformations
+The scatterplots (Appendix A.1) visually examines the relationship between the predictors and the response variable PE. Log transformation was performed on PE and some covariates including: Number of firms and PBV, in order to obtain a linear relationship between the covariates and the response variable. Furthermore, this transformation produces more normally distributed residuals as seen in the normal QQ Plot in Section 2.6.
+
+```{r}
+#Model after transforming variables
+reg1 <- lm(log(PE)~Region+Industry+log(Number_of_firms)+ROE+EPS_Growth+log(PBV)+PS+Beta+Cost_of_Equity+CEO_holding+Institutional_holding, data=dat)
+#summary(reg1)$adj.r.squared #adjusted r squared is 0.3756369
+```
+
+#### 2.3 Multicollinearity
+The goal is to obtain the simplest model with high explanatory power thus Variable Selection is used to choose the important variables. From the correlation plot, there are cases of high correlation from Beta vs Cost of Equity, and ROE vs EPS_Growth, which are suspect cases of multicollinearity.
+
+```{r}
+attach(dat)
+dat2 <- data.frame(cbind(PE, Number_of_firms, ROE, EPS_Growth, PBV, PS, Beta, Cost_of_Equity, CEO_holding, Institutional_holding))
+detach(dat)
+dat2cor <- cor(dat2)
+#dat2cor
+library(corrplot)
+corrplot(dat2cor, type="upper", order="hclust")
+```
+
+Figure 1: Correlation Plot between numeric covariates
+
+In order to avoid a model with poor estimation of coefficients with high variance, we perform further checks on multicollinearity by using VIF (Variance Inflation Factor). We reject the variable if the adjusted GVIF value exceeds 4.0, because then there is a problem with multicollinearity (Hair et al., 2010). From the Table below, we see that ROE, EPS Growth, Beta and Cost of Equity fall into this category. This makes sense as the calculations for Beta are related to Cost of Equity and similarly for EPS Growth with ROE. 
+
+```{r}
+#TRY VIF
+model_vif <- lm(log(PE)~Region+Industry+log(Number_of_firms)+ROE+EPS_Growth+log(PBV)+PS+Beta+Cost_of_Equity+CEO_holding+Institutional_holding,data=dat)
+car::vif(model_vif)
+```
+Figure 2: Multicollinearity check
+
+Thus, we omit the variables that are redundant (ROE and Cost_of_Equity) by choosing the models with higher R squared, as detailed in Appendix A.2. The new model has a significant increase in the adjusted R squared from the original model, so the decision is to replace it. R squared values from this and all other intermediate models are included in Appendix A.4.
+
+```{r}
+#New regression after handling multicollinearity
+dat$ROE <- dat$Cost_of_Equity <- NULL
+reg2 <- lm(log(PE)~Region+Industry+log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS+Beta+CEO_holding+Institutional_holding, data=dat)
+#summary(reg2) #adjusted R squared is 0.3716
+```
+
+Furthermore, Industry will be excluded from the proposed model because each industry is unique in each Region, and does not provide sufficient information as it is statistically unsignificant according to the individual t test seen from the R summary output in Appendix A.4.
+
+```{r}
+#New regression after removing Industry
+dat$Industry <- NULL
+reg2 <- lm(log(PE)~Region+log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS+Beta+CEO_holding+Institutional_holding, data=dat)
+summary(reg2) #adjusted R squared is 0.3095
+```
+
+Although the model now has a slightly lower adjusted R squared than before, this does not necessarily mean that the model or estimates are less accurate.The justification of its removal is the variable provides little useful information, but the R squared could still be higher because adding an extra variable gives the model more opportunity to overfit.  
+
+#### 2.4 Variable Selection
+
+Subsequently, we define p as the number of covariates (including the 2 categorical predictors for Region) and n as the sample size, p= 9, n=281. Because p is much smaller than n, it is computationally less intensive to use the best subset selection method and obtain its AIC. Mallow's Cp is used as it is mathematically proportional to the calculation of AIC (James et al., 2013). The variables selected from the BIC criterion are in line with the Forward and Backward Elimination and Stepwise Regression method, but AIC was chosen as a criterion in favour of BIC because BIC penalises model complexity much more due to the large n. After carrying out individual t tests of significance on the model based on AIC, the results are aligned with the other variable selection methods which are included in Appendix A.2.
+
+```{r}
+#Best Subset Selection based on AIC criterion
+model_bs<-leaps::regsubsets(log(PE)~Region+log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS+Beta+CEO_holding+Institutional_holding,nvmax=11,data=dat)
+plot(model_bs, scale="Cp", main = "Best Subset Regression") #best model: RegionUS, Number of firms, EPS_Growth, PBV, PS, Beta, Insti holdings
+
+#New model after variable selection, choose the variables from AIC
+reg2 <- lm(log(PE)~Region+log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS+Beta+Institutional_holding, data=dat) 
+#summary(reg2) #adjusted R squared is 0.3122
+#significant variables: Number of firms, EPS Growth, PBV, PS
+
+#Updated model after t test of individual significance
+reg2 <- lm(log(PE)~log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS, data=dat) 
+#summary(reg2)
+#adjusted R squared is 0.2845
+```
+
+Figure 3: Best Subset Selection using Mallow’s Cp (AIC)
+
+Updated model:
+$$
+PE=\hat{\beta_0}+\hat{\beta_1}log(\text{Number of firms})+ \hat{\beta_2}log(\text{EPS Growth}) +\hat{\beta_3}log(PBV) +\hat{\beta_4}PS\\
+$$
+
+#### 2.5 Regression Diagnostics I: Removal of Influential Points
+
+The Regression Diagnostics Process begins with the identification of outliers and influential points. A scatterplot of the Standardised Residuals show points fall in a band around zero (which shows constant variance) wiht no pattern. The 11 points outside these bands with the index: 2,19,27,34,40,68,72,81,86,113,159 are outliers and potential influencial points.
+
+```{r}
+#Standardised Residuals Scatterplot
+library(MASS)
+sres <- stdres(reg2)
+par(mfrow=c(1,2))
+plot(sres, ylab="Standardised residuals", main="Standardised residuals scatterplot")
+abline(h=2,col="red")
+abline(h=-2,col="red")
+#sres[sres>2]
+#sres[sres<-2]
+#potential outliers: 2,19,27,34,40,68,72,81,86,113,159
+
+#Leverage scatterplot
+#Hat Values
+lev=hatvalues(reg2)
+#lev[lev>2*6/281] #2p/n
+plot(lev, ylab="hat value", main="leverage scatterplot")
+abline(h=2*6/281,col="red")
+```
+
+By considering the Leverage Scatterplot, we took into account the analysis of high leverage points, which lie beyond the value 2p/n, where p=6 (number of covariates + 1) and n=281 (number of observations). 
+
+But the influence of a point depends on the balance between the size of the outlier, residual size and its leverage. Thus, Cook's distance is used as a single measure of influence of a data point to the regression model. The threshold used for an influential point is 4/n, where n=281.
+
+```{r}
+#Influential points
+#Cook's D
+plot(reg2, which=4)
+abline(h=4/281,col="blue")
+abline(h=0.03,col="pink")
+legend(0.1, 0.2, legend=c("4/281", "0.03"),
+       col=c("blue", "pink"), lty=1, cex=0.8)
+cd=cooks.distance(reg2)
+#cd[cd>4/281] #26 influential points, too many
+#cd[cd>0.03] #6 influential points: 34,68,81,157,182, 251
+```
+
+Figure 5: Cook's distance
+
+Figure 6: Cook's distance after removing influential points
+
+There is a total of 26 points above this cutoff that can be considered influential. However, removing these points takes out 9.25% of the data set, leaving a smaller sample size. To avoid this, a higher cut off point is introduced at 0.03 which produces 6 influential points with the follwoing index: 34,68,81,157,182,251, which leads to the new model having a higher adjusted R squared of 0.319 once these outliers are removed, from 0.2845 obtained previously from the Variable Selection.
+
+
+```{r}
+dat <- read.csv("Market_data2019.csv", header=T)
+dat$ROE <-  as.numeric(gsub("[\\%,]", "", dat$ROE))
+dat$EPS_Growth <-  as.numeric(gsub("[\\%,]", "", dat$EPS_Growth))
+dat$Cost_of_Equity <-  as.numeric(gsub("[\\%,]", "", dat$Cost_of_Equity))
+dat$CEO_holding <-  as.numeric(gsub("[\\%,]", "", dat$CEO_holding))
+dat$Institutional_holding <-  as.numeric(gsub("[\\%,]", "", dat$Institutional_holding))
+write.csv(dat,'Market_data_clean.csv')
+dat <- na.omit(dat) #omit NA values
+dat$ROE <- dat$Cost_of_Equity <- dat$Industry <- NULL
+
+#remove outliers
+#reg2
+#summary(reg2) #adjusted r squared: 0.2845
+dat <- dat[-c(34,68,80,156,181,250),]
+reg3 <- lm(log(PE)~log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS, data=dat)
+reg3
+summary(reg3) #adjusted r squared: 0.319
+coef(reg3)
+plot(reg3,which=4)
+
+#AVP
+#car::avPlots(reg2) #doesnt really tell much
+#AVP can identify groups of influential points, and not just single points (Phil Chan)
+
+```
+
+As good practice, the model was checked to see if it was similar to the one before the outliers were removed(included in Appendix A.4. They are indeed similar and these outliers are likely to be real outliers and fit is improved. (Qiao, 2018). The AVP method was not used because it does not work for MLR (Chan, P 2019).
+
+
+#### 2.6 Regression Diagnostic II: Linear Regression Assumptions
+
+We need to verify that our model is Linear and that it satisfies the NICE assumptions: Normality, Independence of residuals, Constant variance and zero Expectation of residuals.
+The central role for the Partial Residuals plot is to reveal nonlinearity between Y and a given covariate in Multiple Linear Regression (Cook,1993). From the CRP plots below, we can see that the linear relationship is satisfied.
+
+```{r}
+#Partial residual plot
+# reg1 <- lm(PE~.-PE, data=dat)
+# car::crPlots(reg1, line=F, smooth=T) #detect var and covar problem using partial residual plot
+reg3 <- lm(log(PE)~log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS, data=dat)
+car::crPlots(reg3, line=F, smooth=T) #handle by transformation on y
+```
+
+Figure 7: Partial Residuals Plot for MLR
+
+Using the Normal QQ-Plot to detect the Normality of the Normal terms, there is a departure from normality in the tails in Figure 4. In Figure 5, the residuals are more normally distributed after performing Log transformation on the response variable, PE with small deviations from the straight line, which suggests that the residuals can be considered as normally distributed. This is an improvement in comparison to the original QQ Plot where no transformations have occured.
+
+
+```{r}
+dat <- read.csv("Market_data2019.csv", header=T)
+dat$ROE <-  as.numeric(gsub("[\\%,]", "", dat$ROE))
+dat$EPS_Growth <-  as.numeric(gsub("[\\%,]", "", dat$EPS_Growth))
+dat$Cost_of_Equity <-  as.numeric(gsub("[\\%,]", "", dat$Cost_of_Equity))
+dat$CEO_holding <-  as.numeric(gsub("[\\%,]", "", dat$CEO_holding))
+dat$Institutional_holding <-  as.numeric(gsub("[\\%,]", "", dat$Institutional_holding))
+write.csv(dat,'Market_data_clean.csv')
+dat <- na.omit(dat) #omit NA values
+library(ggplot2)
+#Figure 1
+qq1 <- ggplot(reg1) +
+  stat_qq(aes(sample = .stdresid)) +
+  geom_abline()
+
+dat <- dat[-c(34,68,80,156,181,250),]
+#reg3 <- lm(log(PE)~.-PE, data=dat)
+#Figure 2
+qq2 <- ggplot(reg3) +
+  stat_qq(aes(sample = .stdresid)) +
+  geom_abline()
+gridExtra::grid.arrange(qq1,qq2, ncol=2)
+```
+
+Figure 8: Normal QQ Plot for untransformed variables  
+Figure 9: Normal QQ Plot for transformed variables
+
+In the Residuals vs Fitted plot,the fitted(red) line is mostly horizontal, which data points randomly spaced around zero. We can further infer the constant variance assumption is satisfied and that the data has homoscedascity. Further, this plot does not reveal any patterns, so independence is satisfied.
+
+```{r}
+#Residuals vs Fitted plot
+par(mfrow=c(2,2))
+plot(reg3,add.smooth=T)
+```
+
+Figure 10: Plots for final model. Top left: Plot of standardised residuals against fitted values. Top right: Normal Q-Q plot. Bottom left: Scale-Location plot. Bottom right: Plot of residuals against leverage.
+
+### 3. Results
+#### 3.1 Summary of Results
+
+From Figure 11, we can summarise the following results:
+```{r}
+summary(reg3)
+```
+
+Figure 11: R summary output for the proposed Multiple Linear Regression Model
+
+
+#### 3.2 Interpretation of Results
+
+* The proposed model has an adjusted R squared value of 0.3439, which implies that 34.39% of the model can be explained by the proposed regression model. This relatively low R squared value could be a result of the noise in in PE ratios caused by volatile market movements, rather than the regression methodology instead (Aswath Damodaran, 2002).
+* Given a unit increase of one of the predictor variables, the magnitude of the coefficient determines the average increase in the PE ratio, while holding all others constant. Examining our model, Beta is the most important characteristic in determining PE followed by PBV.
+* It makes sense for the EPS Growth coefficient to be negative as it has an inverse relationship with PE in its calculations. Note that in practical use, the quarterly timings of the release of the EPS measure produces a lag in the prediction of the PE.
+* Note that Industry, Cost of Equity and ROE were excluded from the proposed model. Since Industry is unique for each region, it does not provide much useful information. In practical use, calculations on Cost of Equity and ROE are captured in the calculations for Beta and EPS Growth. Further details are detailed in Section 2.3.
+* Note that the model excludes a row with missing entries. Using the Cook’s Distance method, an
+additional 5 influential points are excluded in the final model, as detailed in Section 2.5.  
+* The chosen coefficient for variables in the final model are very significant as evident from the low p values.
+
+
+
+### 4. References
+1. Chan,P. ST300 Lecture Notes from Week 4
+2. Hair et al., 2010
+
+### A. Appendix
+#### A.1 Covariate Scatterplots
+```{r}
+#change variable class
+dat <- read.csv("Market_data2019.csv", header=T)
+dat$ROE <-  as.numeric(gsub("[\\%,]", "", dat$ROE))
+dat$EPS_Growth <-  as.numeric(gsub("[\\%,]", "", dat$EPS_Growth))
+dat$Cost_of_Equity <-  as.numeric(gsub("[\\%,]", "", dat$Cost_of_Equity))
+dat$CEO_holding <-  as.numeric(gsub("[\\%,]", "", dat$CEO_holding))
+dat$Institutional_holding <-  as.numeric(gsub("[\\%,]", "", dat$Institutional_holding))
+write.csv(dat,'Market_data_clean.csv')
+dat <- na.omit(dat) #omit NA values
+dat <- dat[-c(34,68,80,156,181,250),]
+attach(dat)
+#par(mfrow=c(5,2))
+#plot(Industry, log(PE), xlab="Industry", ylab="PE", main="Industry boxplot")
+plot(Region, log(PE), col ="red", xlab="Region", ylab="PE", main="Region boxplot")
+plot(log(Number_of_firms), log(PE), xlab="Number of firms", ylab="PE", main="Number of firms scatterplot")
+abline(lm(log(PE)~Number_of_firms),col="red")
+plot(ROE, log(PE), xlab="ROE", ylab="PE", main="ROE scatterplot")
+abline(lm(log(PE)~ROE),col="red")
+plot(log(EPS_Growth), log(PE), xlab="EPS Growth", ylab="PE", main="EPS Growth scatterplot")
+abline(lm(log(PE)~EPS_Growth),col="red")
+plot(log(PBV), log(PE), xlab="PBV", ylab="PE", main="PBV scatterplot")
+abline(lm(log(PE)~PBV),col="red")
+plot(PS, log(PE), xlab="PS", ylab="PE", main="PS scatterplot")
+abline(lm(log(PE)~PS),col="red")
+plot(Beta, log(PE), xlab="Beta", ylab="PE", main="Beta scatterplot")
+abline(lm(log(PE)~Beta),col="red")
+plot(Cost_of_Equity, log(PE), xlab="Cost of Equity", ylab="PE", main="Cost of Equity scatterplot")
+abline(lm(log(PE)~Cost_of_Equity),col="red")
+plot(CEO_holding, log(PE), xlab="CEO holding", ylab="PE", main="CEO holding scatterplot")
+abline(lm(log(PE)~CEO_holding),col="red")
+plot(Institutional_holding, log(PE), xlab="Institutional holding", ylab="PE", main="Institutional holding scatterplot")
+abline(lm(log(PE)~Institutional_holding),col="red")
+
+detach(dat)
+```
+
+#### A.2 Multicollinearity checks
+```{r}
+dat <- read.csv("Market_data2019.csv", header=T)
+dat$ROE <-  as.numeric(gsub("[\\%,]", "", dat$ROE))
+dat$EPS_Growth <-  as.numeric(gsub("[\\%,]", "", dat$EPS_Growth))
+dat$Cost_of_Equity <-  as.numeric(gsub("[\\%,]", "", dat$Cost_of_Equity))
+dat$CEO_holding <-  as.numeric(gsub("[\\%,]", "", dat$CEO_holding))
+dat$Institutional_holding <-  as.numeric(gsub("[\\%,]", "", dat$Institutional_holding))
+write.csv(dat,'Market_data_clean.csv')
+dat <- na.omit(dat) #omit NA values
+
+reg_noroe <- lm(log(PE)~Region+Industry+log(Number_of_firms)+EPS_Growth+log(PBV)+PS+Beta+Cost_of_Equity+CEO_holding+Institutional_holding, data=dat)
+summary(reg_noroe) #adjusted R squared is 0.3751853
+car::vif(reg_noroe)
+reg_noeps <- lm(log(PE)~Region+Industry+log(Number_of_firms)+ROE+log(PBV)+PS+Beta+Cost_of_Equity+CEO_holding+Institutional_holding, data=dat)
+summary(reg_noeps) #adjusted R squared is  0.3685233
+car::vif(reg_noeps)
+#No ROE has higher adjusted R squared than no EPS Growth, choose to omit ROE
+
+reg_nocoe <- lm(log(PE)~Region+Industry+log(Number_of_firms)+ROE+EPS_Growth+log(PBV)+PS+Beta+CEO_holding+Institutional_holding, data=dat)
+summary(reg_nocoe) #adjusted R squared is 0.3774191
+car::vif(reg_nocoe)
+reg_nobeta <- lm(log(PE)~Region+Industry+log(Number_of_firms)+ROE+EPS_Growth+log(PBV)+PS+Cost_of_Equity+CEO_holding+Institutional_holding, data=dat)
+summary(reg_nobeta) #adjusted R squared is 0.3761222
+car::vif(reg_nobeta)
+#No COE has higher adjusted R squared than no Beta, choose to omit COE 
+```
+
+Adjusted R squared is 0.3751853  
+Adjusted R squared is  0.3685233  
+Adjusted R squared is 0.3774191  
+Adjusted R squared is 0.3761222  
+
+#### A.3 Other Variable Selection Methods
+
+```{r}
+#Best Subset Selection based on BIC criterion
+plot(model_bs, scale="bic") #best model: RegionEUR, Number of firms, EPS_Growth, PBV, PS
+
+#Best Subset Selection based on R squared criterion
+plot(model_bs, scale="adjr2") #best model: RegionUS, Number of firms, EPS_Growth, PBV, PS, Beta, Insti_holding
+
+dat$Industry <- dat$ROE <- dat$Cost_of_Equity <- NULL
+#Try Backward Elimination
+model_back <-lm(log(PE)~Region+log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS+Beta+CEO_holding+Institutional_holding,data=dat)
+model_backb<-step(model_back, trace=0)
+summary(model_backb)
+#significant variables: Number of firms, EPS_Growth, PBV, PS. adjusted R squared is 0.3122
+
+#NOTE: THESE ARE NOT NECESSARILY THE BEST MODELS, CHECK THE RESIDUALS THAT THE ASSUMPTIONS ARE SATISFIED AND CHECK FOR MULTICOLLINEARITY PROBLEMS IN THE COEFFICIENTS
+
+#Try Forward Elimination, for this im not sure if the code is right, he didn't teach properly, dunno if should minus industry
+# null<-lm(log(PE)~1, data=dat)
+# full<-lm(log(PE)~.-PE,data=dat)
+# model_f<-step(null, scope=list(lower=null, upper=full),direction="forward", trace=0)
+# summary(model_f) 
+#significant variables are: Number of firms, EPS_Growth, PBV, PS, Beta
+# adjusted R squared is 0.2283
+
+#stepwise regression, start from nothing
+model_step1 <- step(lm(log(PE)~Region+log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS+Beta+CEO_holding+Institutional_holding #variables from AIC 
+        ,data=dat),direction="both",k=2, trace=0)
+summary(model_step1)
+#significant variables are: Number of firms, EPS_Growth, PBV, PS, adjusted r squared is 0.3122
+
+#stepwise regression, start from everything
+# model_step2 <- step(lm(log(PE)~1,data=dat), direction="both", k=2,scope=~Region+Number_of_firms+EPS_Growth+PBV+PS+Beta+CEO_holding, trace=0)
+# summary(model_step2)
+#significant variables are: PS, Number of firms, EPS_Growth, Beta, PBV, adjusted r squared is 0.2283
+
+```
+
+#### A.4 Intermediate Models
+Initial model
+```{r}
+dat <- read.csv("Market_data2019.csv", header=T)
+dat$ROE <-  as.numeric(gsub("[\\%,]", "", dat$ROE))
+dat$EPS_Growth <-  as.numeric(gsub("[\\%,]", "", dat$EPS_Growth))
+dat$Cost_of_Equity <-  as.numeric(gsub("[\\%,]", "", dat$Cost_of_Equity))
+dat$CEO_holding <-  as.numeric(gsub("[\\%,]", "", dat$CEO_holding))
+dat$Institutional_holding <-  as.numeric(gsub("[\\%,]", "", dat$Institutional_holding))
+write.csv(dat,'Market_data_clean.csv')
+dat <- na.omit(dat) #omit NA values
+
+reg1 <- lm(PE~.-PE, data=dat)
+summary(reg1) #adjusted r squared is 0.1726408
+```
+
+Model after transforming variables
+```{r}
+reg1 <- lm(log(PE)~Region+Industry+log(Number_of_firms)+ROE+log(EPS_Growth)+log(PBV)+PS+Beta+Cost_of_Equity+CEO_holding+Institutional_holding, data=dat)
+summary(reg1) #adjusted r squared is 0.3692356
+```
+
+Model after handling multicollinearity
+```{r}
+dat$ROE <- dat$Cost_of_Equity <- NULL
+reg2 <- lm(log(PE)~Region+Industry+log(Number_of_firms)+EPS_Growth+log(PBV)+PS+Beta+CEO_holding+Institutional_holding, data=dat)
+summary(reg2) #adjusted R squared is 0.377
+```
+
+Model after removing Industry
+```{r}
+dat$Industry <- NULL
+reg2 <- lm(log(PE)~Region+log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS+Beta+CEO_holding+Institutional_holding, data=dat)
+summary(reg2) #adjusted R squared is 0.3095
+```
+
+Updated model after t test of individual significance
+```{r}
+reg2 <- lm(log(PE)~log(Number_of_firms)+log(EPS_Growth)+log(PBV)+PS, data=dat) 
+summary(reg2)
+#adjusted R squared is 0.2845
+```
+
+
+Check on similarity of models in removing Outliers
+```{r}
+coef(reg2)
+coef(reg3)
+```
+
+
+
+
+
+
+
+
+
